@@ -1,5 +1,5 @@
 {
-  "name": "Media Uploader Server",
+  "name": "Media-Uploader",
   "version": "1.0",
   "description": "An server which upload any type of media and send that media link",
   "main": "server.js",

@@ -1,79 +1,147 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const axios = require('axios');
-const fs = require('fs');
+const multer = require('multer');
+const { GridFsStorage } = require('multer-gridfs-storage');
+const { GridFSBucket, ObjectId } = require('mongodb');
 const path = require('path');
-const { v4: uuidv4 } = require('uuid');
+const fs = require('fs');
+const axios = require('axios');
+const crypto = require('crypto');
 
 const app = express();
-app.use(express.json());
+const PORT = process.env.PORT || 10000;
+const MONGO_URI = 'mongodb+srv://toxiciter:Hasan5&7@toxiciter.9tkfu.mongodb.net/STORAGE?retryWrites=true&w=majority&appName=Toxiciter';
 
-
-mongoose.connect('mongodb+srv://toxiciter:Hasan5&7@toxiciter.9tkfu.mongodb.net/STORAGE?retryWrites=true&w=majority&appName=Toxiciter', {
+mongoose.connect(MONGO_URI, {
   useNewUrlParser: true,
-  useUnifiedTopology: true
-}).then(() => console.log("MongoDB Connected"))
-  .catch((err) => console.error(err));
-
-const mediaSchema = new mongoose.Schema({
-  filename: String,
-  originalUrl: String,
-  filetype: String,
-  filepath: String,
-  createdAt: { type: Date, default: Date.now }
+  useUnifiedTopology: true,
 });
 
-const Media = mongoose.model('Media', mediaSchema);
+const conn = mongoose.connection;
+let gfs;
+let gridfsBucket;
 
-const saveDir = path.join(__dirname, 'hasan');
-if (!fs.existsSync(saveDir)) fs.mkdirSync(saveDir);
+conn.once('open', () => {
+  gridfsBucket = new GridFSBucket(conn.db, { bucketName: 'uploads' });
+  gfs = gridfsBucket;
+  console.log('MongoDB Connected');
+});
 
-app.use('/media', express.static(saveDir));
+app.use(express.static('public'));
 
-app.get('/upload', async (req, res) => {
-  const { url } = req.query;
-  if (!url) return res.status(400).json({ error: 'No URL provided' });
-
-  try {
-    const response = await axios({
-      method: 'GET',
-      url,
-      responseType: 'stream'
-    });
-
-    const ext = path.extname(new URL(url).pathname) || '.bin';
-    const filename = `Hasan_${uuidv4()}${ext}`;
-    const filepath = path.join(saveDir, filename);
-
-    const writer = fs.createWriteStream(filepath);
-    response.data.pipe(writer);
-
-    writer.on('finish', async () => {
-      const media = new Media({
-        filename,
-        originalUrl: url,
-        filetype: response.headers['content-type'],
-        filepath: `/media/${filename}`
-      });
-      await media.save();
-
-      res.json({
-        message: 'File saved and stored in DB',
-        fileUrl: `https://store.noobx-api.rf.gd/media/${filename}`
-      });
-    });
-
-    writer.on('error', err => {
-      fs.unlinkSync(filepath);
-      res.status(500).json({ error: 'File write failed' });
-    });
-
-  } catch (err) {
-    res.status(500).json({ error: 'Download failed', detail: err.message });
+const storage = new GridFsStorage({
+  url: MONGO_URI,
+  file: (req, file) => {
+    return {
+      bucketName: 'uploads',
+      filename: crypto.randomBytes(16).toString('hex') + path.extname(file.originalname)
+    };
   }
 });
 
-const PORT = 3000;
+const upload = multer({ storage });
+
+const localFolder = path.join(__dirname, 'hasan');
+if (!fs.existsSync(localFolder)) fs.mkdirSync(localFolder);
+
+// File Upload from local using form
+app.post('/upload-file', upload.single('media'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+  res.json({
+    message: 'File uploaded',
+    fileId: req.file.id,
+    filename: req.file.filename,
+    url: `/media/${req.file.filename}`
+  });
+});
+
+// Upload by remote URL
+app.get('/upload-url', async (req, res) => {
+  const fileUrl = req.query.url;
+  if (!fileUrl) return res.status(400).json({ error: 'No URL provided' });
+
+  try {
+    const response = await axios.get(fileUrl, { responseType: 'stream' });
+    const ext = path.extname(fileUrl.split('?')[0]);
+    const filename = crypto.randomBytes(16).toString('hex') + ext;
+    const tempPath = path.join(localFolder, filename);
+    const writer = fs.createWriteStream(tempPath);
+
+    response.data.pipe(writer);
+
+    writer.on('finish', () => {
+      const fileStream = fs.createReadStream(tempPath);
+      const uploadStream = gridfsBucket.openUploadStream(filename);
+      const fileId = uploadStream.id;
+
+      fileStream.pipe(uploadStream)
+        .on('error', err => {
+          console.error('Upload to GridFS failed', err);
+          return res.status(500).json({ error: 'GridFS upload failed' });
+        })
+        .on('finish', () => {
+          fs.unlinkSync(tempPath);
+          return res.json({
+            message: 'File uploaded from URL',
+            fileId: fileId.toString(),
+            filename: filename,
+            url: `/media/${filename}`
+          });
+        });
+    });
+
+    writer.on('error', err => {
+      console.error('Download error:', err);
+      res.status(500).json({ error: 'Download failed' });
+    });
+
+  } catch (err) {
+    console.error('Axios error:', err.message);
+    res.status(500).json({ error: 'URL fetch failed' });
+  }
+});
+
+// Download by filename
+app.get('/media/:filename', (req, res) => {
+  gfs.find({ filename: req.params.filename }).toArray((err, files) => {
+    if (!files || files.length === 0) {
+      return res.status(404).json({ error: 'File not found' });
+    }
+
+    const readstream = gfs.openDownloadStreamByName(req.params.filename);
+    readstream.pipe(res);
+  });
+});
+
+// Optional: Download by fileId
+app.get('/media/id/:id', (req, res) => {
+  try {
+    const fileId = new ObjectId(req.params.id);
+    const readstream = gfs.openDownloadStream(fileId);
+    readstream.on('error', () => {
+      return res.status(404).json({ error: 'File not found' });
+    });
+    readstream.pipe(res);
+  } catch (err) {
+    return res.status(400).json({ error: 'Invalid file ID' });
+  }
+});
+
+// Sync GridFS files to local (optional, not required always)
+conn.once('open', () => {
+  gfs.find().toArray((err, files) => {
+    files.forEach(file => {
+      const filePath = path.join(localFolder, file.filename);
+      if (!fs.existsSync(filePath)) {
+        const stream = gfs.openDownloadStreamByName(file.filename);
+        const write = fs.createWriteStream(filePath);
+        stream.pipe(write);
+      }
+    });
+  });
+});
+
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });

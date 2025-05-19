@@ -1,88 +1,53 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-  <title>Media Uploader - Creator ♡︎ 𝐻𝐴𝑆𝐴𝑁 ♡︎</title>
+  <meta charset="UTF-8">
+  <title>GridFS File Upload</title>
   <style>
-    body { font-family: sans-serif; padding: 20px; max-width: 600px; margin: auto; }
-    input, button { width: 100%; padding: 10px; margin: 8px 0; }
-    .preview { margin-top: 30px; }
-    .item { margin-bottom: 15px; }
-    video, audio, img { max-width: 100%; height: auto; display: block; margin-top: 5px; }
-    .url { font-size: 12px; color: gray; word-break: break-all; }
+    body {
+      font-family: sans-serif;
+      padding: 20px;
+    }
+    input, button {
+      margin: 5px 0;
+    }
   </style>
 </head>
 <body>
-  <h2>Upload to MongoDB</h2>
+  <h1>Upload File to MongoDB GridFS</h1>
 
-  <form id="fileForm">
+  <h3>Upload from local device:</h3>
+  <form id="uploadForm">
     <input type="file" name="media" required>
-    <button type="submit">Upload File</button>
+    <button type="submit">Upload</button>
   </form>
+  <p id="uploadResponse"></p>
 
-  <form id="urlForm">
-    <input type="text" id="urlInput" placeholder="Enter media URL..." required>
-    <button type="submit">Upload from URL</button>
-  </form>
+  <hr>
 
-  <div class="preview">
-    <h3>Uploaded Files</h3>
-    <div id="fileList"></div>
-  </div>
+  <h3>Upload by URL:</h3>
+  <input type="text" id="urlInput" placeholder="Enter file URL" style="width: 300px;">
+  <button onclick="uploadFromUrl()">Upload URL</button>
+  <p id="urlResponse"></p>
 
   <script>
-    async function fetchFiles() {
-      const res = await fetch('/list-files');
-      const files = await res.json();
-      renderFileList(files);
-    }
-
-    function renderFileList(files) {
-      const container = document.getElementById('fileList');
-      container.innerHTML = '';
-      files.forEach(file => {
-        const div = document.createElement('div');
-        div.className = 'item';
-        let preview = '';
-        if (file.contentType.startsWith('image')) {
-          preview = `<img src="${file.url}">`;
-        } else if (file.contentType.startsWith('video')) {
-          preview = `<video controls src="${file.url}"></video>`;
-        } else if (file.contentType.startsWith('audio')) {
-          preview = `<audio controls src="${file.url}"></audio>`;
-        } else {
-          preview = `<a href="${file.url}" download>Download</a>`;
-        }
-        div.innerHTML = `<strong>${file.filename}</strong><br><span class="url">${location.origin}${file.url}</span>${preview}`;
-        container.appendChild(div);
-      });
-    }
-
-    document.getElementById('fileForm').addEventListener('submit', async function (e) {
+    document.getElementById('uploadForm').addEventListener('submit', async function(e) {
       e.preventDefault();
       const formData = new FormData(this);
-      const res = await fetch('/upload-file', { method: 'POST', body: formData });
-      if (res.ok) {
-        await fetchFiles();
-        this.reset();
-      } else {
-        alert('Upload failed');
-      }
+      const response = await fetch('/upload-file', {
+        method: 'POST',
+        body: formData
+      });
+      const result = await response.json();
+      document.getElementById('uploadResponse').innerText = JSON.stringify(result, null, 2);
     });
 
-    document.getElementById('urlForm').addEventListener('submit', async function (e) {
-      e.preventDefault();
-      const url = document.getElementById('urlInput').value.trim();
-      if (!url) return;
+    async function uploadFromUrl() {
+      const url = document.getElementById('urlInput').value;
       const res = await fetch(`/upload-url?url=${encodeURIComponent(url)}`);
-      if (res.ok) {
-        await fetchFiles();
-        this.reset();
-      } else {
-        alert('URL upload failed');
-      }
-    });
-
-    window.onload = fetchFiles;
+      const result = await res.json();
+      document.getElementById('urlResponse').innerText = JSON.stringify(result, null, 2);
+    }
   </script>
 </body>
 </html>

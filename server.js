@@ -2,7 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const multer = require('multer');
 const { GridFsStorage } = require('multer-gridfs-storage');
-const { GridFSBucket } = require('mongodb');
+const { GridFSBucket, ObjectId } = require('mongodb');
 const path = require('path');
 const fs = require('fs');
 const axios = require('axios');
@@ -44,15 +44,19 @@ const upload = multer({ storage });
 const localFolder = path.join(__dirname, 'hasan');
 if (!fs.existsSync(localFolder)) fs.mkdirSync(localFolder);
 
-
+// File Upload from local using form
 app.post('/upload-file', upload.single('media'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
-  const url = `/media/${req.file.filename}`;
-  res.json({ message: 'File uploaded', url });
+  res.json({
+    message: 'File uploaded',
+    fileId: req.file.id,
+    filename: req.file.filename,
+    url: `/media/${req.file.filename}`
+  });
 });
 
-
+// Upload by remote URL
 app.get('/upload-url', async (req, res) => {
   const fileUrl = req.query.url;
   if (!fileUrl) return res.status(400).json({ error: 'No URL provided' });
@@ -61,14 +65,15 @@ app.get('/upload-url', async (req, res) => {
     const response = await axios.get(fileUrl, { responseType: 'stream' });
     const ext = path.extname(fileUrl.split('?')[0]);
     const filename = crypto.randomBytes(16).toString('hex') + ext;
-
     const tempPath = path.join(localFolder, filename);
     const writer = fs.createWriteStream(tempPath);
 
     response.data.pipe(writer);
+
     writer.on('finish', () => {
       const fileStream = fs.createReadStream(tempPath);
       const uploadStream = gridfsBucket.openUploadStream(filename);
+      const fileId = uploadStream.id;
 
       fileStream.pipe(uploadStream)
         .on('error', err => {
@@ -77,7 +82,12 @@ app.get('/upload-url', async (req, res) => {
         })
         .on('finish', () => {
           fs.unlinkSync(tempPath);
-          return res.json({ message: 'File uploaded', url: `/media/${filename}` });
+          return res.json({
+            message: 'File uploaded from URL',
+            fileId: fileId.toString(),
+            filename: filename,
+            url: `/media/${filename}`
+          });
         });
     });
 
@@ -92,7 +102,7 @@ app.get('/upload-url', async (req, res) => {
   }
 });
 
-
+// Download by filename
 app.get('/media/:filename', (req, res) => {
   gfs.find({ filename: req.params.filename }).toArray((err, files) => {
     if (!files || files.length === 0) {
@@ -104,7 +114,21 @@ app.get('/media/:filename', (req, res) => {
   });
 });
 
+// Optional: Download by fileId
+app.get('/media/id/:id', (req, res) => {
+  try {
+    const fileId = new ObjectId(req.params.id);
+    const readstream = gfs.openDownloadStream(fileId);
+    readstream.on('error', () => {
+      return res.status(404).json({ error: 'File not found' });
+    });
+    readstream.pipe(res);
+  } catch (err) {
+    return res.status(400).json({ error: 'Invalid file ID' });
+  }
+});
 
+// Sync GridFS files to local (optional, not required always)
 conn.once('open', () => {
   gfs.find().toArray((err, files) => {
     files.forEach(file => {

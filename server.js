@@ -1,22 +1,16 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const multer = require('multer');
+const { GridFsStorage } = require('multer-gridfs-storage');
+const Grid = require('gridfs-stream');
 const axios = require('axios');
-const fs = require('fs');
+const { Readable } = require('stream');
 const path = require('path');
-const { v4: uuidv4 } = require('uuid');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const HASAN_FOLDER = path.join(__dirname, 'hasan');
 
-const FileSchema = new mongoose.Schema({
-  filename: String,
-  filepath: String,
-  filetype: String,
-  createdAt: { type: Date, default: Date.now }
-});
-const File = mongoose.model('File', FileSchema);
+let gfs;
 
 mongoose.connect('mongodb+srv://toxiciter:Hasan5&7@toxiciter.9tkfu.mongodb.net/STORAGE?retryWrites=true&w=majority&appName=Toxiciter', {
   useNewUrlParser: true,
@@ -24,75 +18,77 @@ mongoose.connect('mongodb+srv://toxiciter:Hasan5&7@toxiciter.9tkfu.mongodb.net/S
 }).then(() => console.log("MongoDB Connected"))
   .catch((err) => console.error(err));
 
-app.use('/media', express.static(HASAN_FOLDER));
-app.use(express.static('public'));
+const conn = mongoose.connection;
 
+conn.once('open', () => {
+  gfs = Grid(conn.db, mongoose.mongo);
+  gfs.collection('uploads');
+  console.log('MongoDB GridFS connected');
+});
 
-if (!fs.existsSync(HASAN_FOLDER)) fs.mkdirSync(HASAN_FOLDER);
-
-
-const resyncFiles = async () => {
-  const files = await File.find();
-  for (const file of files) {
-    const filePath = path.join(HASAN_FOLDER, file.filename);
-    if (!fs.existsSync(filePath)) {
-      const writer = fs.createWriteStream(filePath);
-      const response = await axios.get(file.filepath, { responseType: 'stream' }).catch(() => null);
-      if (response && response.status === 200) {
-        response.data.pipe(writer);
-      }
-    }
+const storage = new GridFsStorage({
+  url: mongoURI,
+  file: (req, file) => {
+    return {
+      filename: Date.now() + '-' + file.originalname,
+      bucketName: 'uploads'
+    };
   }
-};
-resyncFiles();
-
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, HASAN_FOLDER),
-  filename: (req, file, cb) => cb(null, uuidv4() + path.extname(file.originalname))
 });
 const upload = multer({ storage });
 
+app.use(express.static('public'));
+app.use(express.json());
 
-app.post('/upload-file', upload.single('media'), async (req, res) => {
+
+app.post('/upload-file', upload.single('media'), (req, res) => {
   const file = req.file;
-  const fileUrl = `/media/${file.filename}`;
-  await File.create({
-    filename: file.filename,
-    filepath: fileUrl,
-    filetype: file.mimetype
-  });
-  res.json({ message: 'File uploaded', url: "https://store.noobx-api.rf.gd" + fileUrl });
+  res.json({ message: 'File uploaded', url: `https://store.noobx-api.rf.gd/media/${file.filename}` });
 });
 
 
 app.get('/upload-url', async (req, res) => {
   const fileUrl = req.query.url;
-  if (!fileUrl) return res.status(400).json({ error: 'URL required' });
-
-  const fileExt = path.extname(fileUrl).split('?')[0] || '.bin';
-  const filename = uuidv4() + fileExt;
-  const filepath = path.join(HASAN_FOLDER, filename);
-  const writer = fs.createWriteStream(filepath);
+  if (!fileUrl) return res.status(400).json({ error: 'URL is required' });
 
   try {
-    const response = await axios.get(fileUrl, { responseType: 'stream' });
+    const response = await axios.get(fileUrl, { responseType: 'arraybuffer' });
+    const buffer = Buffer.from(response.data);
+    const filename = Date.now() + '-' + path.basename(fileUrl).split('?')[0];
     const contentType = response.headers['content-type'] || 'application/octet-stream';
 
-    response.data.pipe(writer);
-    writer.on('finish', async () => {
-      const dbPath = `/media/${filename}`;
-      await File.create({ filename, filepath: dbPath, filetype: contentType });
-      res.json({ message: 'File downloaded', url: "https://store.noobx-api.rf.gd" + dbPath });
+    const readableStream = new Readable();
+    readableStream.push(buffer);
+    readableStream.push(null);
+
+    const writestream = gfs.createWriteStream({ filename, content_type: contentType });
+    readableStream.pipe(writestream);
+
+    writestream.on('close', file => {
+      res.json({ message: 'File uploaded from URL', url: `https://store.noobx-api.rf.gd/media/${file.filename}` });
     });
   } catch (err) {
-    res.status(500).json({ error: 'Failed to download from URL' });
+    res.status(500).json({ error: 'Failed to upload from URL' });
   }
 });
 
+
+app.get('/media/:filename', async (req, res) => {
+  const file = await gfs.files.findOne({ filename: req.params.filename });
+  if (!file) return res.status(404).json({ error: 'File not found' });
+
+  const readstream = gfs.createReadStream({ filename: file.filename });
+  res.set('Content-Type', file.contentType);
+  readstream.pipe(res);
+});
+
 app.get('/list-files', async (req, res) => {
-  const files = await File.find().sort({ createdAt: -1 });
-  res.json(files);
+  const files = await gfs.files.find().sort({ uploadDate: -1 }).toArray();
+  res.json(files.map(f => ({
+    filename: f.filename,
+    contentType: f.contentType,
+    url: `https://store.noobx-api.rf.gd/media/${f.filename}`
+  })));
 });
 
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

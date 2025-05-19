@@ -2,91 +2,122 @@ const express = require('express');
 const mongoose = require('mongoose');
 const multer = require('multer');
 const { GridFsStorage } = require('multer-gridfs-storage');
-const Grid = require('gridfs-stream');
-const axios = require('axios');
-const { Readable } = require('stream');
+const { GridFSBucket } = require('mongodb');
 const path = require('path');
+const fs = require('fs');
+const axios = require('axios');
+const crypto = require('crypto');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
-const mongoURI = "mongodb+srv://toxiciter:Hasan5&7@toxiciter.9tkfu.mongodb.net/STORAGE?retryWrites=true&w=majority&appName=Toxiciter";
+const PORT = process.env.PORT || 10000;
+const MONGO_URI = 'mongodb+srv://toxiciter:Hasan5&7@toxiciter.9tkfu.mongodb.net/STORAGE?retryWrites=true&w=majority&appName=Toxiciter';
 
-let gfs;
-
-mongoose.connect(mongoURI, { useNewUrlParser: true, useUnifiedTopology: true }).then(() => console.log("MongoDB Connected"))
-  .catch((err) => console.error(err));
-
-const conn = mongoose.connection;
-
-conn.once('open', () => {
-  gfs = Grid(conn.db, mongoose.mongo);
-  gfs.collection('uploads');
-  console.log('MongoDB GridFS connected');
+mongoose.connect(MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
 });
 
+const conn = mongoose.connection;
+let gfs;
+let gridfsBucket;
+
+conn.once('open', () => {
+  gridfsBucket = new GridFSBucket(conn.db, { bucketName: 'uploads' });
+  gfs = gridfsBucket;
+  console.log('MongoDB Connected');
+});
+
+app.use(express.static('public'));
+
 const storage = new GridFsStorage({
-  url: mongoURI,
+  url: MONGO_URI,
   file: (req, file) => {
     return {
-      filename: Date.now() + '-' + file.originalname,
-      bucketName: 'uploads'
+      bucketName: 'uploads',
+      filename: crypto.randomBytes(16).toString('hex') + path.extname(file.originalname)
     };
   }
 });
+
 const upload = multer({ storage });
 
-app.use(express.static('public'));
-app.use(express.json());
+const localFolder = path.join(__dirname, 'hasan');
+if (!fs.existsSync(localFolder)) fs.mkdirSync(localFolder);
 
 
 app.post('/upload-file', upload.single('media'), (req, res) => {
-  const file = req.file;
-  res.json({ message: 'File uploaded', url: `https://store.noobx-api.rf.gd/media/${file.filename}` });
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+  const url = `/media/${req.file.filename}`;
+  res.json({ message: 'File uploaded', url });
 });
 
 
 app.get('/upload-url', async (req, res) => {
   const fileUrl = req.query.url;
-  if (!fileUrl) return res.status(400).json({ error: 'URL is required' });
+  if (!fileUrl) return res.status(400).json({ error: 'No URL provided' });
 
   try {
-    const response = await axios.get(fileUrl, { responseType: 'arraybuffer' });
-    const buffer = Buffer.from(response.data);
-    const filename = Date.now() + '-' + path.basename(fileUrl).split('?')[0];
-    const contentType = response.headers['content-type'] || 'application/octet-stream';
+    const response = await axios.get(fileUrl, { responseType: 'stream' });
+    const ext = path.extname(fileUrl.split('?')[0]);
+    const filename = crypto.randomBytes(16).toString('hex') + ext;
 
-    const readableStream = new Readable();
-    readableStream.push(buffer);
-    readableStream.push(null);
+    const tempPath = path.join(localFolder, filename);
+    const writer = fs.createWriteStream(tempPath);
 
-    const writestream = gfs.createWriteStream({ filename, content_type: contentType });
-    readableStream.pipe(writestream);
+    response.data.pipe(writer);
+    writer.on('finish', () => {
+      const fileStream = fs.createReadStream(tempPath);
+      const uploadStream = gridfsBucket.openUploadStream(filename);
 
-    writestream.on('close', file => {
-      res.json({ message: 'File uploaded from URL', url: `https://store.noobx-api.rf.gd/media/${file.filename}` });
+      fileStream.pipe(uploadStream)
+        .on('error', err => {
+          console.error('Upload to GridFS failed', err);
+          return res.status(500).json({ error: 'GridFS upload failed' });
+        })
+        .on('finish', () => {
+          fs.unlinkSync(tempPath);
+          return res.json({ message: 'File uploaded', url: `/media/${filename}` });
+        });
     });
+
+    writer.on('error', err => {
+      console.error('Download error:', err);
+      res.status(500).json({ error: 'Download failed' });
+    });
+
   } catch (err) {
-    res.status(500).json({ error: 'Failed to upload from URL' });
+    console.error('Axios error:', err.message);
+    res.status(500).json({ error: 'URL fetch failed' });
   }
 });
 
 
-app.get('/media/:filename', async (req, res) => {
-  const file = await gfs.files.findOne({ filename: req.params.filename });
-  if (!file) return res.status(404).json({ error: 'File not found' });
+app.get('/media/:filename', (req, res) => {
+  gfs.find({ filename: req.params.filename }).toArray((err, files) => {
+    if (!files || files.length === 0) {
+      return res.status(404).json({ error: 'File not found' });
+    }
 
-  const readstream = gfs.createReadStream({ filename: file.filename });
-  res.set('Content-Type', file.contentType);
-  readstream.pipe(res);
+    const readstream = gfs.openDownloadStreamByName(req.params.filename);
+    readstream.pipe(res);
+  });
 });
 
-app.get('/list-files', async (req, res) => {
-  const files = await gfs.files.find().sort({ uploadDate: -1 }).toArray();
-  res.json(files.map(f => ({
-    filename: f.filename,
-    contentType: f.contentType,
-    url: `https://store.noobx-api.rf.gd/media/${f.filename}`
-  })));
+
+conn.once('open', () => {
+  gfs.find().toArray((err, files) => {
+    files.forEach(file => {
+      const filePath = path.join(localFolder, file.filename);
+      if (!fs.existsSync(filePath)) {
+        const stream = gfs.openDownloadStreamByName(file.filename);
+        const write = fs.createWriteStream(filePath);
+        stream.pipe(write);
+      }
+    });
+  });
 });
 
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+});

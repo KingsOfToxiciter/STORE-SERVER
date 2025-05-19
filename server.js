@@ -9,13 +9,11 @@ const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const mongoURI = "mongodb+srv://toxiciter:Hasan5&7@toxiciter.9tkfu.mongodb.net/STORAGE?retryWrites=true&w=majority&appName=Toxiciter";
 
 let gfs;
 
-mongoose.connect('mongodb+srv://toxiciter:Hasan5&7@toxiciter.9tkfu.mongodb.net/STORAGE?retryWrites=true&w=majority&appName=Toxiciter', {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-}).then(() => console.log("MongoDB Connected"))
+mongoose.connect(mongoURI, { useNewUrlParser: true, useUnifiedTopology: true }).then(() => console.log("MongoDB Connected"))
   .catch((err) => console.error(err));
 
 const conn = mongoose.connection;

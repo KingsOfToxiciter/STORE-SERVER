@@ -47,7 +47,7 @@ app.post('/upload-file', upload.single('media'), async (req, res) => {
 
   try {
     const result = await uploadToGitHub(req.file.path, req.file.filename);
-    return res.json({ message: 'File uploaded to GitHub', url: `/media/${req.file.filename}` });
+    return res.json({ message: 'File uploaded to GitHub', url: `https://segs.noobx-api.rf.gd/media/${req.file.filename}` });
   } catch (err) {
     console.error('GitHub Upload Error:', err.response?.data || err.message);
     return res.status(500).json({ error: 'GitHub upload failed' });
@@ -70,7 +70,7 @@ app.get('/upload-url', async (req, res) => {
     writer.on('finish', async () => {
       try {
         const result = await uploadToGitHub(filePath, filename);
-        return res.json({ message: 'URL file uploaded', url: `/media/${filename}` });
+        return res.json({ message: 'URL file uploaded', url: `https://segs.noobx-api.rf.gd/media/${filename}` });
       } catch (err) {
         return res.status(500).json({ error: 'GitHub upload failed' });
       }

@@ -2,52 +2,44 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>GridFS File Upload</title>
-  <style>
-    body {
-      font-family: sans-serif;
-      padding: 20px;
-    }
-    input, button {
-      margin: 5px 0;
-    }
-  </style>
+  <title>NOOBX Media Uploader</title>
 </head>
 <body>
-  <h1>Upload File to MongoDB GridFS</h1>
-
-  <h3>Upload from local device:</h3>
+  <h2>Upload Local File</h2>
   <form id="uploadForm">
-    <input type="file" name="media" required>
+    <input type="file" name="media" required />
     <button type="submit">Upload</button>
   </form>
-  <p id="uploadResponse"></p>
 
-  <hr>
+  <h2>Upload From URL</h2>
+  <form id="urlForm">
+    <input type="url" name="url" placeholder="Enter file URL" required />
+    <button type="submit">Upload URL</button>
+  </form>
 
-  <h3>Upload by URL:</h3>
-  <input type="text" id="urlInput" placeholder="Enter file URL" style="width: 300px;">
-  <button onclick="uploadFromUrl()">Upload URL</button>
-  <p id="urlResponse"></p>
+  <div id="result"></div>
 
   <script>
-    document.getElementById('uploadForm').addEventListener('submit', async function(e) {
-      e.preventDefault();
-      const formData = new FormData(this);
-      const response = await fetch('/upload-file', {
-        method: 'POST',
-        body: formData
-      });
-      const result = await response.json();
-      document.getElementById('uploadResponse').innerText = JSON.stringify(result, null, 2);
-    });
+    const uploadForm = document.getElementById('uploadForm');
+    const urlForm = document.getElementById('urlForm');
+    const result = document.getElementById('result');
 
-    async function uploadFromUrl() {
-      const url = document.getElementById('urlInput').value;
-      const res = await fetch(`/upload-url?url=${encodeURIComponent(url)}`);
-      const result = await res.json();
-      document.getElementById('urlResponse').innerText = JSON.stringify(result, null, 2);
-    }
+    uploadForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const formData = new FormData(uploadForm);
+      const res = await fetch('/upload-file', { method: 'POST', body: formData });
+      const data = await res.json();
+      result.innerHTML = `<p><a href="${data.url}" target="_blank">${data.url}</a></p>`;
+    };
+
+    urlForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const formData = new FormData(urlForm);
+      const url = formData.get('url');
+      const res = await fetch('/upload-url?url=' + encodeURIComponent(url));
+      const data = await res.json();
+      result.innerHTML = `<p><a href="${data.url}" target="_blank">${data.url}</a></p>`;
+    };
   </script>
 </body>
 </html>

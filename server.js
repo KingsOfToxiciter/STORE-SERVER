@@ -22,7 +22,7 @@ app.use('/media', express.static(uploadFolder));
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, uploadFolder),
   filename: (req, file, cb) => {
-    const filename = crypto.randomBytes(16).toString('hex') + path.extname(file.originalname);
+    const filename = crypto.randomBytes(5).toString('hex') + path.extname(file.originalname);
     cb(null, filename);
   }
 });
@@ -60,7 +60,7 @@ app.get('/upload-url', async (req, res) => {
 
   try {
     const ext = path.extname(fileUrl.split('?')[0]) || '.bin';
-    const filename = crypto.randomBytes(16).toString('hex') + ext;
+    const filename = crypto.randomBytes(5).toString('hex') + ext;
     const filePath = path.join(uploadFolder, filename);
 
     const response = await axios.get(fileUrl, { responseType: 'stream' });

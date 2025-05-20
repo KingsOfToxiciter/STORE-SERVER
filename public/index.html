@@ -2,7 +2,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Media Uploader - Creator ♡️ 𝔍𝔆𝔌𝔀𝔇 ♡️</title>
+  <title>Noobx Uploader - Creator ♡️ 𝔍𝔆𝔌𝔀𝔇 ♡️</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -55,7 +55,7 @@
       formData.append("media", document.getElementById("media").files[0]);
 
       try {
-        const res = await fetch("/upload/file", {
+        const res = await fetch("/upload-file", {
           method: "POST",
           body: formData,
         });
@@ -75,7 +75,7 @@
       if (!url) return alert("Please enter a URL");
 
       try {
-        const res = await fetch(`/upload/url?url=${encodeURIComponent(url)}`);
+        const res = await fetch(`/upload-url?url=${encodeURIComponent(url)}`);
         const data = await res.json();
         if (data.url) {
           result.innerHTML = `<strong>File URL:</strong> <a href="${data.url}" target="_blank">${data.url}</a>`;

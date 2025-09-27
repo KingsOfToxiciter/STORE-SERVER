@@ -4,13 +4,15 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const config = require("./config.json");
 
 const app = express();
 const PORT = process.env.PORT || 10000;
 
-const GITHUB_USERNAME = 'KingsOfToxiciter';
-const REPO_NAME = 'STORE-SERVER';
-const ACCESS_TOKEN = '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';
+const GITHUB_USERNAME = config.GITHUB_USERNAME;
+const REPO_NAME = config.REPO_NAME;
+const ACCESS_TOKEN = config.ACCESS_TOKEN;
+const SERVER_URL = config.SERVER_URL;
 const GITHUB_API_URL = `https://api.github.com/repos/${GITHUB_USERNAME}/${REPO_NAME}/contents/hasan`;
 
 const uploadFolder = path.join(__dirname, 'hasan');
@@ -47,7 +49,7 @@ app.post('/upload-file', upload.single('media'), async (req, res) => {
 
   try {
     const result = await uploadToGitHub(req.file.path, req.file.filename);
-    return res.json({ message: 'File uploaded to GitHub', url: `https://segs.noobx-api.rf.gd/media/${req.file.filename}` });
+    return res.json({ message: 'File uploaded to GitHub', url: `${SERVER_URL}/media/${req.file.filename}` });
   } catch (err) {
     console.error('GitHub Upload Error:', err.response?.data || err.message);
     return res.status(500).json({ error: 'GitHub upload failed' });
@@ -70,7 +72,7 @@ app.get('/upload-url', async (req, res) => {
     writer.on('finish', async () => {
       try {
         const result = await uploadToGitHub(filePath, filename);
-        return res.json({ message: 'URL file uploaded', url: `https://segs.noobx-api.rf.gd/media/${filename}` });
+        return res.json({ message: 'URL file uploaded', url: `${SERVER_URL}/media/${filename}` });
       } catch (err) {
         return res.status(500).json({ error: 'GitHub upload failed' });
       }
